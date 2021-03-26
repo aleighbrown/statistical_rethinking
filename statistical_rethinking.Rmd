@@ -1,0 +1,745 @@
+---
+title: "Statical rethinking notes"
+author: "Anna-Leigh Brown"
+date: "11/03/2021"
+output:
+    html_document:
+        code_folding: hide
+        toc: true
+        toc_float: true
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), 'docs/index.html')) })
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(tidyverse)
+
+```
+# Chapter 3
+
+This is how to generate samples from a grid posterior
+
+```{r}
+water = 6
+tosses = 9
+p_grid = seq(from = 0, to = 1, length.out = 1000)
+prob_p = rep(1, 1000)
+
+prob_data = dbinom(water, tosses, prob = p_grid)
+posterior = prob_data * prob_p
+posterior = posterior / sum(posterior)
+```
+
+Now we'll sample 10,000 times from the posterior
+
+```{r}
+samples = sample(p_grid, prob = posterior, size = 1e4, replace = T)
+```
+
+```{r}
+dens(samples)
+```
+
+## Intervals of defined boundaries
+What's the posterior probability that the true proportion of water is less than 50%? 
+
+With our grid approximation we can simply sum up all the probability where that's true
+
+```{r}
+sum(posterior[p_grid < 0.5])
+
+sum(samples < 0.5) / 1e4
+
+```
+
+Using the same approach you can ask how much posterior probability lies between 0.5 and 0.75?
+
+```{r}
+sum( samples > 0.5 & samples < 0.75) / 1e4
+```
+
+To define the boundaries of the lower 80% posterior probabilities we can use 
+quantile funciton 
+```{r}
+quantile( samples, 0.8)
+quantile( samples , c( 0.1 , 0.9 ) )
+```
+
+But that only works when the tails of our posterior aren't skewed, what about data like this which is? 
+
+```{r}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep(1,1000)
+likelihood <- dbinom( 6 , size=9 , prob=p_grid )
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+samples <- sample( p_grid , size=1e4 , replace=TRUE , prob=posterior )
+post = tibble(posterior = samples)
+x.dens <- density(post$posterior)
+df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+pct_interval = PI( samples , prob=0.5 )
+ggplot(data = post) + theme_bw() + 
+    geom_density(aes(x=posterior, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x >= pct_interval[1] & x <= pct_interval[2]), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = pct_interval[1])  + 
+    geom_vline(xintercept = pct_interval[2])  +
+    ggtitle('50% Percentile Interval')
+```
+
+On the other hand we can plot the highest posterior density interval. 
+The HPDI is the narrowest inteval containing the specfied probability mass. 
+
+There is afteral an infinite number of intervals containing the same mass,
+but we want the interval that best represents teh parameter values that is most
+consistent with the data. 
+
+```{r}
+pct_interval = HPDI( samples , prob=0.5 )
+ggplot(data = post) + theme_bw() + 
+    geom_density(aes(x=posterior, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x >= pct_interval[1] & x <= pct_interval[2]), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = pct_interval[1])  + 
+    geom_vline(xintercept = pct_interval[2])  +
+    ggtitle('50% Highest Posterior Density Interval')
+```
+
+Now let us try to compute some point estimates. 
+A common one to report is the mode of the  aposterior estimate
+It's easy to calculate
+```{r}
+p_grid[which.max(posterior)]
+```
+
+Or from samples from the posterior
+```{r}
+rethinking::chainmode(samples, adj = 0.01)
+```
+
+But we could just as well use the mean or the median
+
+A principled way to choice which point estimate is using a loss function. 
+Different loss functions will imply different point estimates
+
+Let's say we decide to make a loss function where the further away from the correct value
+we are, the worse
+The point estimate that maximizes that is the median of the posterior distribution
+
+```{r}
+decision = seq(from = 0 , to = 1, by = 0.001)
+
+loss = purrr::map(decision,  ~ sum(posterior * abs(.x - p_grid))) %>% purrr::simplify()
+plot(decision,loss)
+
+p_grid[which.min(loss)]
+median(samples)
+```
+In order to pick a point estimate, we need to define our loss function first. 
+
+## 3.3. Sampling to simulate prediction
+
+1. We can use sampling to design and understand what kinds of values our model is generating. 
+2. We can use sampling to check that our model is working correctly
+3. We can use sampling to ensure that our software fitting working properly 
+4. This can help use design future experiments
+5. Predictions about the future
+
+### Dummy data and the posterior predictive distribution
+
+
+```{r}
+w <- rbinom( 1e4 , size=9 , prob=samples )
+simplehist(w)
+```
+
+
+# Chapter 3 Questions
+```{r generate_data}
+
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep( 1 , 1000 )
+likelihood <- dbinom( x = 6 , size=9 , prob=p_grid )
+question_post <- likelihood * prior
+question_post <- question_post / sum(question_post)
+set.seed(100)
+question_samples <- sample( p_grid , prob=question_post , size=1e4 , replace=TRUE )
+
+question_post = tibble(posterior_samples = question_samples)
+x.dens <- density(question_post$posterior_samples)
+df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+```
+
+## 3 - E1
+How much posterior probability lies below p = 0.2?
+```{r}
+
+
+# new code is below
+cutoff = 0.2
+
+post_below = sum(question_samples < cutoff) / 1e4
+
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') + 
+    geom_area(data = subset(df.dens, x <= cutoff), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff) +
+    ggtitle(glue::glue("{post_below} is below {cutoff}")) 
+    
+```
+
+## 3 - E2
+How much posterior probability lies above p = 0.8?
+```{r}
+
+
+# new code is below
+cutoff = 0.8
+post_below = sum(question_samples > cutoff) / 1e4
+
+
+
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') + 
+    geom_area(data = subset(df.dens, x >= cutoff), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff) +
+    ggtitle(glue::glue("{post_below} is above {cutoff}")) 
+```
+
+## 3 - E3
+How much posterior probability lies between p = 0.2 and p = 0.8?
+```{r}
+
+# new code is below
+cutoff_up = 0.8
+cutoff_down = 0.2
+post_below = (sum(question_samples <cutoff_up & question_samples > cutoff_down))/ 1e4
+
+
+ggplot(data = question_post) + 
+    theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') + 
+    geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff_up) +
+    geom_vline(xintercept = cutoff_down) +
+    ggtitle(glue::glue("{post_below} is between {cutoff_up} & {cutoff_down}"))
+```
+
+## 3 - E4
+20% of the posterior probability lies below which value of p?
+
+```{r}
+
+pct_interval =PI( question_samples , prob=0.60)
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x <= pct_interval[1]), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = pct_interval[1])  + 
+    ggtitle(glue::glue("20% of posterior probability is below {round(pct_interval[1],2)}"))
+
+```
+
+## 3 - E5
+
+20% of the posterior probability lies above which value of p?
+
+
+```{r}
+
+
+pct_interval =PI( question_samples , prob=0.60)
+
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x >= pct_interval[2]), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = pct_interval[2])  + 
+    ggtitle(glue::glue("20% of posterior probability is above {round(pct_interval[2],2)}"))
+```
+
+## 3 - E6
+Which values of p contain the narrowest interval equal to 66% of the posterior probability?
+```{r}
+
+pct_interval = HPDI( question_samples , prob=0.66)
+
+cutoff_up = pct_interval[2]
+cutoff_down = pct_interval[1]
+
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff_up) +
+    geom_vline(xintercept = cutoff_down) +
+    ggtitle(glue::glue("The narrowest interval equal to 66% of the posterior probability \n is between {round(cutoff_down,2)} & {round(cutoff_up,2)}"))
+```
+
+## 3 - E7
+
+Which values of p contain 66% of the posterior probability, assuming equal posterior probability both below and above the interval?
+
+```{r}
+
+pct_interval = PI( question_samples , prob=0.66)
+
+cutoff_up = pct_interval[2]
+cutoff_down = pct_interval[1]
+ggplot(data = question_post) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff_up) +
+    geom_vline(xintercept = cutoff_down) +
+    ggtitle(glue::glue("Assuming equal mass on left and right tail -  \n  66% of posterior probability is between {round(cutoff_down,2)} & {round(cutoff_up,2)}"))
+```
+
+## 3 - M1
+Suppose the globe tossing data had turned out to be 8 water in 15 tosses. Construct the posterior distribution, using grid approximation. Use the same flat prior as before.
+
+```{r generate_data_new,echo = TRUE}
+
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep( 1 , 1000 )
+likelihood <- dbinom( x = 8 , size=15 , prob=p_grid )
+question_post_medium <- likelihood * prior
+question_post_medium <- question_post_medium / sum(question_post_medium)
+```
+
+## 3 - M2
+Draw 10,000 samples from the grid approximation from above. Then use the samples to calculate the 90% HPDI for p.
+
+```{r,echo = TRUE}
+set.seed(100)
+
+question_samples_medium <- sample( p_grid , prob=question_post_medium , size=1e5 , replace=TRUE )
+
+question_post_medium = tibble(posterior_samples = question_samples_medium)
+
+x.dens <- density(question_post_medium$posterior_samples)
+df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+
+
+pct_interval = HPDI( question_samples_medium , prob=0.90)
+cutoff_up = pct_interval[2]
+cutoff_down = pct_interval[1]
+flat_prior_plot = ggplot(data = question_post_medium) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff_up) +
+    geom_vline(xintercept = cutoff_down) +
+    ggtitle(glue::glue("For 8 water in 15 tosses the \n narrowest interval equal to 90% of the posterior probability \n is between {round(cutoff_down,2)} & {round(cutoff_up,2)}"))
+print(flat_prior_plot)
+```
+
+## 3 - M3
+Construct a posterior predictive check for this model and data. This means simulate the distribution of samples, averaging over the posterior uncertainty in p. What is the probability of observing 8 water in 15 tosses?
+```{r, echo= T}
+#simulate the distribution of samples
+posterior_predictive <- rbinom( 1e4 , size=15 , prob=question_post_medium$posterior_samples )
+simplehist(posterior_predictive)
+sum(posterior_predictive == 8) / length(posterior_predictive)
+```
+
+The probability of observing 8 water in 15 tosses is `r sum(posterior_predictive == 8) / length(posterior_predictive)`
+
+## 3 - M4
+
+using the posterior from 8/15 calculate the probability of 6 water in 9 tosses
+```{r}
+#simulate the distribution of samples
+posterior_predictive_69 <- rbinom( 1e4 , size=9 , prob=question_post_medium$posterior_samples )
+simplehist(posterior_predictive_69)
+sum(posterior_predictive_69 == 6) / length(posterior_predictive_69)
+```
+The probability of 6 water in 9 tosses is `r sum(posterior_predictive_69 == 6) / length(posterior_predictive_69)`
+
+## 3 - M5
+Start over at M1 but now start with either prior that p > 0.5 and anything below 
+is 0 - basically start knowing that the majority of the Earth is water.
+```{r majority_water,echo = TRUE}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior_majority_water <- rep( 1 , 1000 )
+prior_majority_water[which(p_grid < 0.5)] = 0
+likelihood_majority_water <- dbinom( x = 8 , size=15 , prob=p_grid )
+posterior_majority_water <- likelihood_majority_water * prior_majority_water
+posterior_majority_water <- posterior_majority_water / sum(posterior_majority_water)
+```
+
+Comparing the 90% HPDI for the uniform prior and the one where we know 
+majority of the Earth is water
+```{r}
+set.seed(100)
+
+question_samples_maj_water <- sample( p_grid , prob=posterior_majority_water , size=1e5 , replace=TRUE )
+
+question_post_maj_water = tibble(posterior_samples = question_samples_maj_water)
+
+x.dens <- density(question_post_maj_water$posterior_samples)
+df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+
+
+pct_interval = HPDI( question_samples_maj_water , prob=0.90)
+cutoff_up = pct_interval[2]
+cutoff_down = pct_interval[1]
+
+maj_water_plot = ggplot(data = question_post_maj_water) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+              aes(x=x,y=y), fill = 'blue') +
+    geom_vline(xintercept = cutoff_up) +
+    geom_vline(xintercept = cutoff_down) +
+    ggtitle(glue::glue("Majority water - For 8 water in 15 tosses the \n 90% of the posterior probability \n is between {round(cutoff_down,2)} & {round(cutoff_up,2)}")) + xlim(0,1)
+
+ggpubr::ggarrange(flat_prior_plot,maj_water_plot)
+```
+
+## 3 - M5 - Posterior predictive check 
+Construct a posterior predictive check for this model and data. This means simulate the distribution of samples, averaging over the posterior uncertainty in p. What is the probability of observing 8 water in 15 tosses?
+```{r}
+#simulate the distribution of samples
+posterior_predictive_maj <- rbinom( 1e4 , size=15 , prob=question_post_maj_water$posterior_samples )
+simplehist(posterior_predictive_maj)
+sum(posterior_predictive_maj == 8) / length(posterior_predictive_maj)
+```
+
+Flat prior of observing 8 water in 15 tosses is `r sum(posterior_predictive == 8) / length(posterior_predictive)`
+
+Knowing the Earth is mostly water observing 8 water in 15 tosses is `r sum(posterior_predictive_maj == 8) / length(posterior_predictive_maj)`
+
+## 3 - M5 - Calculate 6 in 9 from the sample
+
+using the posterior from 8/15 calculate the probability of 6 water in 9 tosses
+```{r}
+#simulate the distribution of samples
+posterior_predictive_69_maj <- rbinom( 1e4 , size=9 , prob=question_post_maj_water$posterior_samples )
+simplehist(posterior_predictive_69)
+simplehist(posterior_predictive_69_maj)
+sum(posterior_predictive_69_maj == 6) / length(posterior_predictive_69)
+```
+
+Flat prior -  probability of 6 water in 9 tosses is `r sum(posterior_predictive_69 == 6) / length(posterior_predictive_69)`
+
+Majority water prior -  probability of 6 water in 9 tosses is `r sum(posterior_predictive_69_maj == 6) / length(posterior_predictive_69)`
+
+## 3 - M6
+
+Suppose you want to estimate the Earth’s proportion of water very precisely. Specifically, you want the 99% percentile interval of the posterior distribution of p to be only 0.05 wide. This means the distance between the upper and lower bound of the interval should be 0.05. How many times will you have to toss the globe to do this?
+
+```{r, echo = TRUE}
+
+
+generate_intervals_by_num = function(num_samples = 10,uniform = TRUE){
+    set.seed(42)
+    p_grid <- seq( from=0 , to=1 , length.out=1000 )
+    if(uniform == TRUE){
+       prior <- rep( 1 , 1000 )
+
+    }else{
+      prior = ifelse(p_grid < 0.5 , 0 , 1)
+
+    }
+
+    
+    tosses = rbinom(1,size = num_samples, prob = 0.7)
+    
+    likelihood <- dbinom( x = tosses , size=num_samples , prob=p_grid )
+
+    looping_posterior <- likelihood * prior
+    looping_posterior <- looping_posterior / sum(looping_posterior)
+    
+    sampled_loop <- sample( p_grid , prob=looping_posterior , size=1e5 , replace=TRUE )
+    
+    pct = HPDI(sampled_loop,prob = 0.99)
+
+    width = abs(pct[2] - pct[1])
+
+    return(width)
+}
+
+
+num_sample = 1500
+width_of_hpdi = generate_intervals_by_num(num_sample)
+while(width_of_hpdi > 0.05){
+    num_sample = num_sample + 1
+    width_of_hpdi = generate_intervals_by_num(num_sample)
+}
+beepr::beep(sound = 2)
+
+num_sample_maj = 500
+width_of_hpdi_maj_water = generate_intervals_by_num(num_sample_maj,uniform = FALSE)
+while(width_of_hpdi_maj_water > 0.05){
+    num_sample_maj = num_sample_maj + 1
+    width_of_hpdi_maj_water = generate_intervals_by_num(num_sample_maj,uniform = FALSE)
+}
+print(num_sample)
+
+```
+
+
+## 3 - H1
+
+Introduction. The practice problems here all use the data below. These data indicate the gender
+(male=1, female=0) of officially reported first and second born children in 100 two-child families.
+
+
+```{r}
+birth1 <- c(1,0,0,0,1,1,0,1,0,1,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,0,
+0,0,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0,
+1,1,0,1,0,0,1,0,0,0,1,0,0,1,1,1,1,0,1,0,1,1,1,1,1,0,0,1,0,1,1,0,
+1,0,1,1,1,0,1,1,1,1)
+birth2 <- c(0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0,
+1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1,
+0,0,0,1,1,1,0,0,0,0)
+
+
+birth_tibble = data.table::data.table(birth1,birth2)
+```
+
+
+Using grid approximation, compute the posterior distribution for the probability of a birth being a boy. Assume a uniform prior probability. Which parameter value maximizes the posterior probability?
+
+```{r, echo = TRUE}
+
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep( 1 , 1000 )
+likelihood_boy <- dbinom( x = 111 , size=200 , prob=p_grid )
+hard_posterior <- likelihood_boy * prior
+hard_posterior <- hard_posterior / sum(hard_posterior)
+```
+
+
+```{r}
+hard_posterior_samples <- sample( p_grid , prob=hard_posterior , size=1e5 , replace=TRUE )
+
+hard_posterior_samples = tibble(posterior_samples = hard_posterior_samples)
+
+x.dens <- density(hard_posterior_samples$posterior_samples)
+df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+
+point = tibble(x = p_grid[which.max(hard_posterior)], y = max(density(hard_posterior_samples$posterior_samples)$y))
+
+ggplot(data = hard_posterior_samples) + theme_bw() + 
+    geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+    geom_point(data = point, aes(x = x, y = y),size = 4) + 
+    xlim(0,1) + 
+    ggtitle(glue::glue("The maximum a posteriori estimate for being born a boy is {round(p_grid[which.max(hard_posterior)],2)}"))
+```
+
+
+## 3 - H2
+
+Using the sample function, draw 10,000 random parameter values from the posterior distri- bution you calculated above. Use these samples to estimate the 50%, 89%, and 97% highest posterior density intervals.
+
+```{r}
+
+create_hpdi_plot = function(prob,posterior_samples_df){
+    x.dens <- density(posterior_samples_df$posterior_samples)
+    df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+    
+    pct_interval = HPDI(posterior_samples_df$posterior_samples , prob=prob)
+
+    cutoff_up = pct_interval[2]
+    cutoff_down = pct_interval[1]
+    
+    hpdi_graph = ggplot(data = posterior_samples_df) + theme_bw() + 
+        geom_density(aes(x=posterior_samples, y = ..density..), color = 'black') +
+        geom_area(data = subset(df.dens, x <= cutoff_up & x >= cutoff_down), 
+                  aes(x=x,y=y), fill = 'blue') +
+        geom_vline(xintercept = cutoff_up) +
+        geom_vline(xintercept = cutoff_down) +
+        xlim(0,1) + 
+        ggtitle(glue::glue("Highest {prob * 100}% of the posterior probability \n is between {round(cutoff_down,2)} & {round(cutoff_up,2)}"))
+    
+    return(hpdi_graph)
+}
+
+plts = purrr::map(c(0.5,0.89,0.97),create_hpdi_plot,hard_posterior_samples)
+ggpubr::ggarrange(plotlist =  plts,nrow = 3)
+```
+
+## 3 - H3
+
+Use rbinom to simulate 10,000 replicates of 200 births. 
+Compare the distribution of predicted numbers to actual count. 
+Does it look like the model fits the data well - does the distribution of predictions
+include the actual observation as a central, likely outcome? 
+
+```{r}
+simulated_births <- rbinom( 1e4 , size=200,prob = 0.5)
+ggplot() + 
+    geom_density(aes(x = simulated_births)) + 
+    geom_vline(xintercept =  111) + 
+    ggtitle("Simulated Births - Line at true boy births 111")
+```
+
+## 3 - H4
+
+Now compare only to the counts of first borns 
+```{r}
+simulated_births <- rbinom( 1e4 , size=100,prob = 0.5)
+ggplot() + 
+    geom_density(aes(x = simulated_births)) + 
+    geom_vline(xintercept =  51) + 
+    ggtitle("Simulated Births - First Born Sex - 51 boys")
+```
+
+## 3 - H5
+
+The model assumes independence between birth order and baby sex. 
+But is this true? Focus on the sex of the second born after a girl. 
+```{r}
+simulated_births <- rbinom( 1e4 , size=49,prob = 0.5)
+ggplot() + 
+    geom_density(aes(x = simulated_births)) + 
+    geom_vline(xintercept =  39) + 
+    ggtitle(glue::glue("Simulated Births - Older Sibling Female :( "))
+```
+
+We can do a chi.sq as well showing the lack of independence here
+
+
+
+<!-- # Chapter 4 -->
+
+<!-- ```{r} -->
+<!-- library(rethinking) -->
+<!-- library(data.table) -->
+<!-- data(Howell1) -->
+<!-- data = as.data.table(Howell1) -->
+
+<!-- precis(data) -->
+<!-- ``` -->
+
+<!-- We're trying to model adults first, because height is really correlated with age -->
+<!-- only in children -->
+
+<!-- ```{r} -->
+<!-- adults = data[age >= 18] -->
+
+<!-- dens(adults$height) -->
+<!-- ``` -->
+
+<!-- Let's define heights as normally distributed with a mean of 'mu' and a standard deviation 'sigma' -->
+
+<!-- h_i ~ Normal(mu, sigma) > likelihood -->
+
+<!-- Now we need to make some prior assumptions about how the mean and standard deviation should look -->
+
+<!-- h_i ~ Normal(mu, sigma) > likelihood -->
+<!-- mu ~ Normal(178, 20) > prior about mu -->
+<!-- sigma ~ Uniform(0,50) > prior about sigma -->
+
+<!-- You should plot your priors so you have an idea what assumptions they are going to build -->
+
+<!-- ```{r} -->
+<!-- curve(dnorm(x, 178, 20), from = 100, to = 250) -->
+<!-- curve(dunif(x, 0, 50),from = -10, to = 60) -->
+<!-- ``` -->
+
+<!-- We can take a look at what our priors say about what we think heights should -->
+<!-- look like by sampling from them -->
+
+<!-- ```{r} -->
+<!-- sample_mu = rnorm(1e4, 178, 20) -->
+<!-- sample_sigma = runif(1e4, 0, 50) -->
+<!-- prior_h = rnorm(1e4, sample_mu, sample_sigma) -->
+<!-- dens(prior_h) -->
+<!-- ``` -->
+
+<!-- Let's do some brute force grid approximation before we learn quadratic approximation -->
+
+<!-- ```{r} -->
+<!-- mu.list <- seq( from=150, to=160 , length.out=100 ) -->
+<!-- sigma.list <- seq( from=7 , to=9 , length.out=100 ) -->
+<!-- post <- expand.grid( mu=mu.list , sigma=sigma.list ) -->
+<!-- post #all the possible mu and sigma in our defined ranges -->
+<!-- post$LL <- sapply( 1:nrow(post) , function(i) sum( -->
+<!--     dnorm( adults$height , post$mu[i] , post$sigma[i] , log=TRUE ) ) ) -->
+
+<!-- post$prod <- post$LL + dnorm( post$mu , 178 , 20 , TRUE ) + -->
+<!--     dunif( post$sigma , 0 , 50 , TRUE ) -->
+
+<!-- post$prob <- exp( post$prod - max(post$prod) ) -->
+
+<!-- contour_xyz( post$mu , post$sigma , post$prob ) -->
+<!-- image_xyz( post$mu , post$sigma , post$prob ) -->
+<!-- ``` -->
+
+<!-- Now we will sample from the posterior -->
+
+<!-- ```{r} -->
+<!-- sample_row = sample(1:nrow(post),  -->
+<!--                     size = 1e4,  -->
+<!--                     replace = T, -->
+<!--                     prob = post$prob) -->
+
+<!-- sample_mu = post$mu[sample.row] -->
+<!-- sample_sigma = post$sigma[sample.row] -->
+
+<!-- plot( sample_mu , sample_sigma , cex=0.5 , pch=16 , col=col.alpha(rangi2,0.1) ) -->
+
+<!-- dens( sample_mu ) -->
+<!-- dens(sample_sigma) -->
+
+<!-- PI(sample_mu) -->
+<!-- PI( sample_sigma) -->
+<!-- ``` -->
+
+<!-- Let's think about sample size now -->
+
+<!-- ```{r} -->
+<!-- small_d = sample(adults$height, size = 20) -->
+
+<!-- mu_list = seq(from = 150, to = 170, length.out = 200) -->
+<!-- sigma_list = seq(from =  4, to = 20, length.out = 200) -->
+<!-- post2 = expand.grid(mu = mu_list, sigma = sigma_list) -->
+
+<!-- post2$LL = purrr::map2(post2$mu, post2$sigma, ~sum(dnorm(small_d, mean = .x, sd = .y, log = T))) %>% simplify() -->
+
+<!-- post2 = as.data.table(post2) -->
+<!-- post2[,prod := LL + dnorm(mu,178,20,TRUE) + dunif(sigma, 0,50,TRUE)] -->
+
+<!-- post2$prob = exp(post2$prod - max(post2$prod)) -->
+
+<!-- sample2_rows = sample(1:nrow(post2),  -->
+<!--                       size = 1e4,  -->
+<!--                       replace = TRUE, -->
+<!--                       prob = post2$prob) -->
+
+<!-- sample2_mu = post2[sample2_rows,mu] -->
+<!-- sample2_sigma = post2[sample2_rows,sigma] -->
+<!-- plot( sample2_mu , sample2_sigma , cex=0.5 , -->
+<!--     col=col.alpha(rangi2,0.1) , -->
+<!--     xlab="mu" , ylab="sigma" , pch=16 ) -->
+
+<!-- dens( sample2_sigma , norm.comp=TRUE ) -->
+<!-- ``` -->
+
+<!-- Ok now say goodbye to the grid -->
+
+<!-- We're going to use quadratic approximations now -->
+
+<!-- ```{r} -->
+<!-- library(rethinking) -->
+<!-- data("Howell1") -->
+<!-- adults = Howell1 %>% filter(age >= 18) -->
+
+<!-- flist = alist( -->
+<!--     height ~ dnorm(mu, sigma), -->
+<!--     mu ~ dnorm(178, 20), -->
+<!--     sigma ~ dunif(0, 50) -->
+<!-- ) -->
+
+<!-- our_first_quap = rethinking::quap(flist, adults) -->
+<!-- precis(our_first_quap) -->
+<!-- ``` -->
+
