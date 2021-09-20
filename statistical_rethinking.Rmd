@@ -604,142 +604,313 @@ ggplot() +
     ggtitle(glue::glue("Simulated Births - Older Sibling Female :( "))
 ```
 
-We can do a chi.sq as well showing the lack of independence here
+We could do a chi.sq as well showing the lack of independence here?
+
+# Chapter 4
+
+Linear regression is a descriptive model which can make helpful predictions for us, but if we try to read into it's structure as meaning something, we're likely to make mistakes. 
+
+There's nothing magical about the normal distribution - let's take a coin flip example, where me and all 999 of my friends each take a coin and line up on the 
+center line of a field, for each heads we take one step to the right and for tails a step to the left, and we do that 16 times. 
+We will arrange ourselves into a normal distribution at the end of the 16 trials. 
+
+This is normal by addition. 
+
+```{r}
+pos = replicate(1000, sum(runif(16, -1, 1)))
+```
+
+
+Any process which adds together random values from the same distribution will converge to normal. 
+
+Small effects multiplied tend to be equivalent to adding them. 
+
+Adding logs is equivalent to multiplying the original numbers - thus even large 
+multiplicative effects tend to be normal once we put them on the log scale. 
+
+There are two justifications for using Gaussian distributions: 
+
+1. ontological(related to the state of being or existence) - they're everywhere. 
+They're everywhere because measurement errors and true variations are lots of 
+minor fluctuations from a true generating mean which all add together and cancel out
+and thus leave only the mean and spread behind 
+
+2. epistemological (the state of knowledge) - Gaussian distribution can be realized 
+in the most possible ways, therefore we make the least number of assumptions about the
+generating process when we choose to start from a Gaussian. If we don't pick a Gaussian, 
+that assumes we know something about the data generating process that tells us not to 
+pick a Gaussian. 
+
+
+The common language for describing a model. 
+
+First we recognize a set of things we want to understand, called our variables. 
+
+We start with data - these are things we can actually observe. 
+
+Unobservable things like rates and averages we call the parameters. 
+
+For the things we want to understand, we define them in terms of other variables or in terms of a probability distribution. 
+
+## Gaussian model of height
+
+We're going to make a linear regression between height and weight. 
+We want a single measurement variable to model as a Gaussian distribution, with two parameters to describe its
+shape the mean mu and the standard deviation sigma. 
+We'll use Bayesian updated to allow us to consider every possible combination of values for mu and sigma, 
+and to score each combination by its relative plausibility, considering the data. 
+
+The estimate will be the entire posterior distribution, not any point within it - so they posterior distribution will be a distribution of Gaussian distributions. 
+
+## The data to regress
+
+We're going to use the `Howell1` census data. 
+
+```{r}
+library(rethinking)
+data("Howell1")
+d = Howell1
+#keep only the adults - as the heights and weights of children are related differently
+d2 = d %>% filter(age >= 18)
+rethinking::dens(d2$height)
+```
+
+Let's start by using a Gaussian distribution, because we have no good reason not to
+
+height_individual ~ Normal(mu, sigma)
+
+mu ~ Normal(178, 20) - a prior assumption on the average height of an individual
+
+sigma ~ Uniform(0, 50) - a prior assumption about the variability of height. 
+
+Once you pick some priors, you should plot them so you know what you're assuming
+
+```{r}
+curve( dnorm( x , 178 , 20 ) , from=100 , to=250)
+```
+
+```{r}
+curve( dunif( x , 0 , 50 ) , from=-10 , to=60 )
+```
+
+As we've done before we can sample from heights using these prior
+
+```{r}
+sample_mu = rnorm(1e4, 178, 20)
+sample_sigma = runif(1e4, 0 , 50)
+prior_h = rnorm(1e4, sample_mu, sample_sigma)
+dens(prior_h)
+```
+
+Right, so first we're going to calculate the posterior distribution using grid approximation
+
+```{r}
+mu.list <- seq( from=150, to=160 , length.out=100 ) 
+sigma.list <- seq( from=7 , to=9 , length.out=100 )
+post <- expand.grid( mu=mu.list , sigma=sigma.list )
+post$LL <- sapply( 1:nrow(post) , function(i) sum(
+dnorm( d2$height , post$mu[i] , post$sigma[i] , log=TRUE ) ) )
+post$prod <- post$LL + dnorm( post$mu , 178 , 20 , TRUE ) +
+dunif( post$sigma , 0 , 50 , TRUE )
+post$prob <- exp( post$prod - max(post$prod) )
+
+contour_xyz( post$mu , post$sigma , post$prob )
+```
 
 
 
-<!-- # Chapter 4 -->
+We can again sample parameter values from the posterior, but now we have 2 parameters
 
-<!-- ```{r} -->
-<!-- library(rethinking) -->
-<!-- library(data.table) -->
-<!-- data(Howell1) -->
-<!-- data = as.data.table(Howell1) -->
+```{r}
+sample.rows <- sample( 1:nrow(post) , size=1e4 , replace=TRUE ,prob=post$prob )
+sample.mu <- post$mu[ sample.rows ]
+sample.sigma <- post$sigma[ sample.rows ]
+plot( sample.mu , sample.sigma , cex=0.5 , pch=16 , col=col.alpha(rangi2,0.1) )
 
-<!-- precis(data) -->
-<!-- ``` -->
+dens( sample.mu )
+dens( sample.sigma )
 
-<!-- We're trying to model adults first, because height is really correlated with age -->
-<!-- only in children -->
+PI( sample.mu )
+PI( sample.sigma )
+```
 
-<!-- ```{r} -->
-<!-- adults = data[age >= 18] -->
+Quap quap ya'll
 
-<!-- dens(adults$height) -->
-<!-- ``` -->
+```{r}
+flist = alist(
+  height ~ dnorm(mu, sigma),
+  mu ~ dnorm(178, 20 ),
+  sigma ~ dunif(0, 50)
+)
 
-<!-- Let's define heights as normally distributed with a mean of 'mu' and a standard deviation 'sigma' -->
+m4.1 = rethinking::quap(flist, d2)
 
-<!-- h_i ~ Normal(mu, sigma) > likelihood -->
+precis( m4.1 )
 
-<!-- Now we need to make some prior assumptions about how the mean and standard deviation should look -->
+vcov( m4.1 )
 
-<!-- h_i ~ Normal(mu, sigma) > likelihood -->
-<!-- mu ~ Normal(178, 20) > prior about mu -->
-<!-- sigma ~ Uniform(0,50) > prior about sigma -->
+library(rethinking)
+post <- extract.samples( m4.1 , n=1e4 ) #to extract samples from the quap 
+head(post)
+```
 
-<!-- You should plot your priors so you have an idea what assumptions they are going to build -->
+## Linear model
 
-<!-- ```{r} -->
-<!-- curve(dnorm(x, 178, 20), from = 100, to = 250) -->
-<!-- curve(dunif(x, 0, 50),from = -10, to = 60) -->
-<!-- ``` -->
+A linear model assumes that a predictor variable has a constant and additive
+relationship t the mean of the outcome. 
 
-<!-- We can take a look at what our priors say about what we think heights should -->
-<!-- look like by sampling from them -->
+To get our predictor variable into the definition of height
 
-<!-- ```{r} -->
-<!-- sample_mu = rnorm(1e4, 178, 20) -->
-<!-- sample_sigma = runif(1e4, 0, 50) -->
-<!-- prior_h = rnorm(1e4, sample_mu, sample_sigma) -->
-<!-- dens(prior_h) -->
-<!-- ``` -->
+height_individual ~ Normal(mu_i, sigma) - likelihood
 
-<!-- Let's do some brute force grid approximation before we learn quadratic approximation -->
+mu_i = a + b * (x_i - x_bar) - the linear models
 
-<!-- ```{r} -->
-<!-- mu.list <- seq( from=150, to=160 , length.out=100 ) -->
-<!-- sigma.list <- seq( from=7 , to=9 , length.out=100 ) -->
-<!-- post <- expand.grid( mu=mu.list , sigma=sigma.list ) -->
-<!-- post #all the possible mu and sigma in our defined ranges -->
-<!-- post$LL <- sapply( 1:nrow(post) , function(i) sum( -->
-<!--     dnorm( adults$height , post$mu[i] , post$sigma[i] , log=TRUE ) ) ) -->
+a ~ Normal(178, 20) - a prior on alpha
+b ~ Normal(0, 10) - a prior on beta
+sigma ~ Uniform(0,50) - a prior on sigma
 
-<!-- post$prod <- post$LL + dnorm( post$mu , 178 , 20 , TRUE ) + -->
-<!--     dunif( post$sigma , 0 , 50 , TRUE ) -->
+What do our prior generator for us?
 
-<!-- post$prob <- exp( post$prod - max(post$prod) ) -->
+```{r}
+set.seed(2971)
+N <- 100 # 100 lines
+a <- rnorm( N , 178 , 20 )
+b <- rnorm( N , 0 , 10 )
 
-<!-- contour_xyz( post$mu , post$sigma , post$prob ) -->
-<!-- image_xyz( post$mu , post$sigma , post$prob ) -->
-<!-- ``` -->
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) ,
+xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N ) curve( a[i] + b[i]*(x - xbar) ,
+from=min(d2$weight) , to=max(d2$weight) , add=TRUE ,
+col=col.alpha("black",0.2) )
+```
 
-<!-- Now we will sample from the posterior -->
+Well that generates some craziness - after all we know there's going to be a 
+positive relationship between height and weight. So let's stop it from being negative. 
+The easiest way to do that is to define a prior as Log-Normal instead.
 
-<!-- ```{r} -->
-<!-- sample_row = sample(1:nrow(post),  -->
-<!--                     size = 1e4,  -->
-<!--                     replace = T, -->
-<!--                     prob = post$prob) -->
+B ~ Log-Normal(0,1)
 
-<!-- sample_mu = post$mu[sample.row] -->
-<!-- sample_sigma = post$sigma[sample.row] -->
+exp(x) is greater than zero for any real number x, therefore if the log of 
+B is normal, then B itself must be positive. 
 
-<!-- plot( sample_mu , sample_sigma , cex=0.5 , pch=16 , col=col.alpha(rangi2,0.1) ) -->
+```{r}
+b <- rlnorm( 1e4 , 0 , 1 ) 
+dens( b , xlim=c(0,5) , adj=0.1 )
+```
 
-<!-- dens( sample_mu ) -->
-<!-- dens(sample_sigma) -->
+Now let's try again, but using a log-normal to keep B positive
 
-<!-- PI(sample_mu) -->
-<!-- PI( sample_sigma) -->
-<!-- ``` -->
+```{r}
+set.seed(2971)
+N <- 100 # 100 lines
+a <- rnorm( N , 178 , 20 )
+b <- rlnorm( N , 0 , 1 ) 
 
-<!-- Let's think about sample size now -->
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) ,
+xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N ) curve( a[i] + b[i]*(x - xbar) ,
+from=min(d2$weight) , to=max(d2$weight) , add=TRUE ,
+col=col.alpha("black",0.2) )
+```
 
-<!-- ```{r} -->
-<!-- small_d = sample(adults$height, size = 20) -->
+Now let's find the posterior distribution
 
-<!-- mu_list = seq(from = 150, to = 170, length.out = 200) -->
-<!-- sigma_list = seq(from =  4, to = 20, length.out = 200) -->
-<!-- post2 = expand.grid(mu = mu_list, sigma = sigma_list) -->
+```{r}
 
-<!-- post2$LL = purrr::map2(post2$mu, post2$sigma, ~sum(dnorm(small_d, mean = .x, sd = .y, log = T))) %>% simplify() -->
 
-<!-- post2 = as.data.table(post2) -->
-<!-- post2[,prod := LL + dnorm(mu,178,20,TRUE) + dunif(sigma, 0,50,TRUE)] -->
+# #Define average weight, x_bar
+xbar <- mean(d2$weight)
+# 
+m4.3 <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + b*(weight - xbar),
+    a ~ dnorm(178,20),
+    b ~ dlnorm(0,1),
+    sigma ~ dunif(0, 50)
+  ),
+  data = d2
+)
+```
 
-<!-- post2$prob = exp(post2$prod - max(post2$prod)) -->
+While this may be a little mathematically dodgey, for y = log(x), we can imagine this as saying that we're going to assign y to be the order of magnitude of x. And when we see the function x= exp(y) we're turning a magnitude into a value. 
 
-<!-- sample2_rows = sample(1:nrow(post2),  -->
-<!--                       size = 1e4,  -->
-<!--                       replace = TRUE, -->
-<!--                       prob = post2$prob) -->
+So now this lets us code a log-normal prior of beta to be coded another way
 
-<!-- sample2_mu = post2[sample2_rows,mu] -->
-<!-- sample2_sigma = post2[sample2_rows,sigma] -->
-<!-- plot( sample2_mu , sample2_sigma , cex=0.5 , -->
-<!--     col=col.alpha(rangi2,0.1) , -->
-<!--     xlab="mu" , ylab="sigma" , pch=16 ) -->
+```{r}
+m4.3b <- quap(
+  alist(
+    height ~ dnorm( mu , sigma ) ,
+    mu <- a + exp(log_b)*( weight - xbar ),
+    a ~ dnorm( 178 , 20 ) ,
+    log_b ~ dnorm( 0 , 1 ) ,
+    sigma ~ dunif( 0 , 50 )) ,
+data=d2 )
+```
 
-<!-- dens( sample2_sigma , norm.comp=TRUE ) -->
-<!-- ``` -->
+Ok we have a posterior, now what? 
 
-<!-- Ok now say goodbye to the grid -->
+Well, obviously we plot it
 
-<!-- We're going to use quadratic approximations now -->
+```{r}
+rethinking::pairs(m4.3)
+```
 
-<!-- ```{r} -->
-<!-- library(rethinking) -->
-<!-- data("Howell1") -->
-<!-- adults = Howell1 %>% filter(age >= 18) -->
+```{r}
+plot( height ~ weight , data=d2 , col=rangi2 )
+post <- extract.samples( m4.3 )
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+curve( a_map + b_map*(x - xbar) , add=TRUE )
+```
 
-<!-- flist = alist( -->
-<!--     height ~ dnorm(mu, sigma), -->
-<!--     mu ~ dnorm(178, 20), -->
-<!--     sigma ~ dunif(0, 50) -->
-<!-- ) -->
 
-<!-- our_first_quap = rethinking::quap(flist, adults) -->
-<!-- precis(our_first_quap) -->
-<!-- ``` -->
+OK so let's look at tables of a trained model first about the relationship between height and weight
+
+```{r}
+precis(m4.3)
+```
+
+So, what do these mean? Starting with beta we can read this as "a person 1kg heavier is expected to be 0.90 cm taller. 89% o the posterior probability lies between 0.84 and 0.97
+
+Let's draw some uncertainty by sampling from the posterior
+```{r}
+N <- 100
+dN <- d2[ 1:N , ]
+mN <- quap(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + b*( weight - mean(weight) ) ,
+a ~ dnorm( 178 , 20 ) ,
+b ~ dlnorm( 0 , 1 ) ,
+sigma ~ dunif( 0 , 50 )
+) , data=dN )
+post <- extract.samples(m4.3)
+
+# display raw data and sample size
+plot( dN$weight , dN$height ,
+xlim=range(d2$weight) , ylim=range(d2$height) ,
+col=rangi2 , xlab="weight" , ylab="height" )
+mtext(concat("N = ",N))
+
+post <- extract.samples( mN , n=20 )
+# display raw data and sample size
+plot( dN$weight , dN$height ,
+xlim=range(d2$weight) , ylim=range(d2$height) ,
+col=rangi2 , xlab="weight" , ylab="height" )
+mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:20 )
+curve( post$a[i] + post$b[i]*(x-mean(dN$weight)) ,
+col=col.alpha("black",0.3) , add=TRUE )
+```
+
 
