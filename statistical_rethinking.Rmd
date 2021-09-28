@@ -1486,8 +1486,39 @@ Our 3 models to test should be:
 
 1. Age at marriage should be independent of Waffle Houses once we condition on it being a Southern state
 2. Divorce rate should be independent of being a South State, once we condition the Age, Marriage rate ,and presence of waffle houses (i suspect this is not correct)
-3. Marriage rate should be independent of Waffle Houses once we condition on being a Southern state
 
+```{r}
+data(WaffleDivorce)
+
+#normalize Waffles and make Southern be 1 or 2
+d2 = WaffleDivorce %>% 
+  mutate(D = scale(Divorce)) %>% 
+  mutate(W = scale(WaffleHouses)) %>% 
+  mutate(S = South + 1) %>% 
+  mutate(M = scale(Marriage)) %>% 
+  mutate(A = scale(MedianAgeMarriage)) %>% as.data.frame()
+
+  
+MOD_h2b <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bA * A + bS * S + bM * M + bW * W,
+    a ~ dnorm(0, 1),
+    c(bA, bS, bM, bW) ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ),
+  data = d2
+)
+ 
+precis(MOD_h2b)
+plot(rethinking::precis(MOD_h2b))
+```
+adsfasdf
+3. Marriage rate should be independent of Waffle Houses once we condition on being a Southern state
+aposkdf'asdf
+
+
+asdfasdfsd
 
 If any of the tests fail, how do you think the graph needs to be amended? 
 
