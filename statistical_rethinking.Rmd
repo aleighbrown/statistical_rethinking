@@ -49,7 +49,7 @@ What's the posterior probability that the true proportion of water is less than 
 With our grid approximation we can simply sum up all the probability where that's true
 
 ```{r}
-sum(posterior[p_grid < 0.5])
+sum(plkjlkjosterior[p_grid < 0.5])
 
 sum(samples < 0.5) / 1e4
 
